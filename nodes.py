@@ -139,16 +139,42 @@ def _cancel_task(task_id, api_key):
         pass
 
 
+PROXY_DOWNLOAD_TIMEOUT = 90
+
+
 def _download_to_tensor(url):
-    last_err = None
-    for attempt in range(5):
+    # 直连会话（全局 SESSION：禁用代理）
+    # 代理会话：走系统/环境代理，供直连超时后 fallback
+    proxy_session = requests.Session()
+    proxy_session.trust_env = True
+
+    def _get_bytes(sess, timeout):
+        use_proxy = (sess is proxy_session)
+        saved = None
+        if use_proxy:
+            # 全局设置了 NO_PROXY=*，代理模式下临时放开，否则代理不生效
+            saved = (os.environ.pop("NO_PROXY", None), os.environ.pop("no_proxy", None))
         try:
-            resp = SESSION.get(url, timeout=30, stream=True)
+            resp = sess.get(url, timeout=timeout, stream=True)
             chunks = []
             for chunk in resp.iter_content(chunk_size=65536):
                 chunks.append(chunk)
             resp.close()
-            data = b"".join(chunks)
+            return b"".join(chunks)
+        finally:
+            if use_proxy:
+                if saved[0] is not None:
+                    os.environ["NO_PROXY"] = saved[0]
+                if saved[1] is not None:
+                    os.environ["no_proxy"] = saved[1]
+
+    # 直连 30s -> 代理 90s -> 直连 30s -> 代理 90s
+    plans = [(SESSION, 30), (proxy_session, PROXY_DOWNLOAD_TIMEOUT),
+             (SESSION, 30), (proxy_session, PROXY_DOWNLOAD_TIMEOUT)]
+    last_err = None
+    for sess, timeout in plans:
+        try:
+            data = _get_bytes(sess, timeout)
             pil = Image.open(io.BytesIO(data))
             return _pil_to_tensor(pil)
         except Exception as e:
