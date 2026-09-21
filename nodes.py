@@ -309,6 +309,33 @@ def _make_image_node(label, cfg, is_img2img):
     })
 
 
+class JiuwanliCleanImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "run"
+    CATEGORY = "九万里"
+    OUTPUT_NODE = False
+
+    def run(self, image):
+        arr = image[0].cpu().float().numpy()
+        arr = (np.clip(arr, 0.0, 1.0) * 255.0).round().astype(np.uint8)
+        pil = Image.fromarray(arr).convert("RGB")
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=100, subsampling=0)
+        buf.seek(0)
+        clean = Image.open(buf).convert("RGB")
+        out = np.array(clean).astype("float32") / 255.0
+        return (torch.from_numpy(out).unsqueeze(0),)
+
+
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
@@ -317,3 +344,6 @@ for name, cfg in MODEL_DEFS.items():
         cls = _make_image_node(name, cfg, is_img2img)
         NODE_CLASS_MAPPINGS[cls.__name__] = cls
         NODE_DISPLAY_NAME_MAPPINGS[cls.__name__] = f"九万里 {name} {'图生图' if is_img2img else '文生图'}"
+
+NODE_CLASS_MAPPINGS["jwl_clean_image"] = JiuwanliCleanImage
+NODE_DISPLAY_NAME_MAPPINGS["jwl_clean_image"] = "九万里 清除图片数据"
